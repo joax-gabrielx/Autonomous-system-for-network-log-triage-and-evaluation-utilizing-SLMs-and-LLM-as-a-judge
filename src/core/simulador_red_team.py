@@ -94,12 +94,11 @@ def injetar_ataque_no_lote(linhas_reais, probabilidade_injecao=1.0):
         # A tag 'Alerta_RedTeam' serve SÓ para o Early Drop não matá-lo na casca 
         # (mas a Camada 1 irá apagá-la antes da IA ler num teste anti-fraude)
         nova_linha = (
-            f'generated_time="{tempo_evento.strftime("%Y/%m/%d %H:%M:%S")}" '
+            f'generated_time="{tempo_evento.strftime("%Y/%m/%d %H:%M:%S")}" type="Traffic" threat_id="RedTeam-Attack" severity="High" '
             f'src_ip={attacker_ip} dst_ip={alvo_escolhido} dst_port={porta_escolhida} action={ataque["acao"]} '
             f'{str_bytes}rule_name=Alerta_RedTeam application={ataque["app"]} proto=tcp notes="Emulacao_RAM"\n'
         )
         linhas_sinteticas.append(nova_linha)
-
     # Junta o lote malicioso cravado temporalmente com as requisições normais
     lote_misto = linhas_reais + linhas_sinteticas
     lote_misto.sort(key=extrair_tempo_str)
