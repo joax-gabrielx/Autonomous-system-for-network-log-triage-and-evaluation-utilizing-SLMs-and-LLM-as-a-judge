@@ -9,7 +9,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 from typing import List
-
+from core.mcp_threat_intel import MCPThreatIntel
 from config import ARQUIVO_PLAYBOOK, ARQUIVO_SFT, ARQUIVO_METRICAS, SLM_MODELO, OLLAMA_URL, OLLAMA_KEEP_ALIVE, ARQUIVO_BLACKLIST
 
 load_dotenv()
@@ -49,82 +49,65 @@ class Camada3AgenteSOC:
         self.MODELO = SLM_MODELO 
         self.OLLAMA_URL = OLLAMA_URL
         self.OLLAMA_KEEP_ALIVE = OLLAMA_KEEP_ALIVE
-        self.cache_decisoes = {} 
+        self.cache_decisoes = {}
+        self.mcp_intel = MCPThreatIntel() 
 
     def _consultar_ia_batch(self, lista_incidentes):
         prompt_sistema = """Você é o Aegis, um Analista SOC Nível 3.
-Sua tarefa é avaliar incidentes de rede e gerar a cadeia de pensamento.
+Sua tarefa é avaliar incidentes de rede e gerar a cadeia de pensamento completa OBRIGATORIAMENTE, sem deixar campos vazios.
 
-[REGRAS DE NEGÓCIO ESTRITAS - OVERRIDE DE SEGURANÇA (A TRÍADE)]
-1. BLOQUEAR (Matar) - PRIORIDADE MÁXIMA: 
-   - Se o tempo indicar [BURST AGUDO] em portas administrativas (ex: 22 SSH, 3389 RDP). Isso é ataque de Força Bruta. O RAG ESTÁ ERRADO se disser que é benigno. Bloqueie imediatamente.
-   - Se houver [⚠️ DLP ALERTA] de Upload massivo (>50MB). Isso é Exfiltração de Dados. O RAG ESTÁ ERRADO se disser que é benigno. Bloqueie imediatamente.
-2. FALSO POSITIVO (Ignorar): Se o tráfego for focado na porta 80/443 de uma zona de servidores enviando dados rotineiros SEM alertas de DLP ou Burst, e o RAG afirmar "FALSO POSITIVO".
-3. MONITORAR (Investigar): Se o IP apresentar [DISPERSÃO ALTA] tocando vários IPs, MAS sem alertas de DLP nem Burst.
-4. Fidelidade Factual OBRIGATÓRIA: Leia a Porta exata no log. A Porta 22 é exclusivamente SSH. NUNCA chame a porta 22 de HTTP/HTTPS. Cite os Megabytes (MB) exatos se houver DLP.
-
-[EXEMPLO 1: Força Bruta SSH (BLOQUEAR)]
+[REGRAS DE NEGÓCIO ESTRITAS - A TRÍADE DE DECISÃO]
+1. O PESO DO FIREWALL (OBRIGATÓRIO): Se o log contiver 'FW-SEVERIDADE: HIGH' ou 'CRITICAL', isso é uma prova incontestável de ataque. Você DEVE citar explicitamente a Severidade e a tag 'FW-THREAT' na sua análise e BLOQUEAR.
+2. CONCORDÂNCIA COM O RAG: Se o log indica ataque (Burst, DLP ou Severidade Alta) E a dica do RAG também recomenda BLOQUEAR, você deve afirmar que CONCORDA com o RAG e com o firewall físico.
+3. OVERRIDE DE SEGURANÇA: Só discorde do RAG se ele disser "Falso Positivo" mas os dados físicos apontarem anomalias graves (Burst, Exfiltração ou Severidade Alta).
+4. INTELIGÊNCIA GLOBAL (ABUSEIPDB): Se o log contiver a tag '[🌍 THREAT INTEL: ALERTA GLOBAL]' com um Score acima de 0%, você DEVE citar o Score e BLOQUEAR. ATENÇÃO: Se a tag for '[🌍 THREAT INTEL: LIMPO]', mas houver anomalias físicas graves (Burst, DLP, Severidade Alta), IGNORE a inteligência externa e BLOQUEIE. Pode ser um ataque direcionado de IP novo (Zero-Day).
+[EXEMPLO 1: Concordância (RAG Certo + Severidade Alta)]
 {
   "avaliacoes": [
     {
-      "id_alvo": "177.74.3.212",
-      "padrao_ataque": "ST-ALIGN | ORIGEM: 177.74.3.212 | ESPAÇO: [FOCADO] | TEMPO: [BURST AGUDO] Taxa de 80.0 ev/s | FIREWALL: App [ssh]. Porta 22.",
-      "dica_rag": "FALSO POSITIVO: Comportamento não mapeado.",
-      "analise_contexto": "Log aponta um [BURST AGUDO] extremo de 80 eventos/segundo focado na porta 22 (SSH).",
-      "justificativa": "A taxa de 80 ev/s na porta 22 é uma assinatura inegável de Força Bruta SSH. Discordo do RAG, pois o volume temporal anômalo na porta de gestão comprova o ataque malicioso.",
+      "id_alvo": "185.15.20.50",
+      "padrao_ataque": "ST-ALIGN | ESPAÇO: [FOCADO] | TEMPO: [BURST AGUDO] Taxa de 50.0 ev/s | FW-SEVERIDADE: HIGH | FW-THREAT: RedTeam-Attack. Porta 22.",
+      "dica_rag": "Ameaça Crítica. Assinatura clara de ataque. Recomenda-se BLOQUEAR.",
+      "analise_contexto": "O log apresenta um [BURST AGUDO] extremo de 50 eventos/segundo na porta 22. Mais importante, o firewall físico carimbou a conexão com FW-SEVERIDADE: HIGH e a tag RedTeam-Attack.",
+      "justificativa": "Concordo integralmente com a dica do RAG. A junção da anomalia volumétrica temporal com o alerta nativo de severidade Alta do firewall torna o diagnóstico de ataque inegável.",
       "veredito": "BLOQUEAR",
       "nivel_confianca": "ALTA"
     }
   ]
 }
 
-[EXEMPLO 2: Exfiltração de Dados (BLOQUEAR)]
+[EXEMPLO 2: Override (RAG Errado + DLP Alerta)]
 {
   "avaliacoes": [
     {
       "id_alvo": "177.74.1.128",
-      "padrao_ataque": "ST-ALIGN | ORIGEM: 177.74.1.128 | ESPAÇO: [FOCADO] | TEMPO: [TEMPO NORMAL] | [⚠️ DLP ALERTA] Upload de 200.0 Megabytes | FIREWALL: Porta 443.",
+      "padrao_ataque": "ST-ALIGN | ESPAÇO: [FOCADO] | TEMPO: [TEMPO NORMAL] | [⚠️ DLP ALERTA] Upload de 200.0 Megabytes | Porta 443.",
       "dica_rag": "FALSO POSITIVO: Tráfego benigno.",
-      "analise_contexto": "Conexão focada na porta 443 com alerta crítico de DLP de 200 MB transferidos.",
-      "justificativa": "O alerta DLP de 200 MB de upload para um único alvo exterior indica exfiltração de dados camuflada (Canal Oculto). O RAG falhou em classificar a anomalia volumétrica. Bloqueio imediato para estancar o vazamento.",
+      "analise_contexto": "Tráfego na porta 443 com alerta gravíssimo de DLP acusando upload de 200 MB, configurando exfiltração.",
+      "justificativa": "Discordo veementemente do RAG. O vazamento massivo de dados (200MB) detectado pelo DLP comprova a exfiltração. Bloqueio imediato para contenção.",
       "veredito": "BLOQUEAR",
       "nivel_confianca": "ALTA"
     }
   ]
 }
 
-[EXEMPLO 3: Tráfego Legítimo de Servidor (FALSO POSITIVO)]
+[EXEMPLO 3: Tráfego Legítimo]
 {
   "avaliacoes": [
     {
       "id_alvo": "10.0.3.40",
-      "padrao_ataque": "ST-ALIGN | ORIGEM: 10.0.3.40 (DMZ3) | ESPAÇO: [FOCADO] | TEMPO: [TEMPO NORMAL] | FIREWALL: App [web-browsing]. Porta 80.",
-      "dica_rag": "FALSO POSITIVO: Comportamento não mapeado. Tráfego benigno.",
-      "analise_contexto": "Tráfego focado na porta 80 vindo da DMZ3 com tempo normal, sem anomalias volumétricas ou picos.",
-      "justificativa": "Sem anomalias de burst ou alertas de DLP, a comunicação na porta 80 é consistente com operações normais de web. O RAG confirma tratar-se de comportamento benigno.",
+      "padrao_ataque": "ST-ALIGN | ESPAÇO: [FOCADO] | TEMPO: [TEMPO NORMAL] | Porta 80.",
+      "dica_rag": "FALSO POSITIVO: Tráfego benigno.",
+      "analise_contexto": "Tráfego HTTP padrão sem alertas de burst, dispersão espacial, DLP ou tags de firewall.",
+      "justificativa": "Alinhado com a base do RAG, o tráfego não apresenta qualquer comportamento anômalo. Atividade rotineira.",
       "veredito": "FALSO_POSITIVO",
       "nivel_confianca": "ALTA"
     }
   ]
 }
 
-[EXEMPLO 4: Zona Cinzenta / Varredura (MONITORAR)]
-{
-  "avaliacoes": [
-    {
-      "id_alvo": "10.0.1.15",
-      "padrao_ataque": "ST-ALIGN | ORIGEM: 10.0.1.15 (REDE_INTERNA) | EVENTOS: 45 | ESPAÇO: [DISPERSÃO ALTA] Este IP já escaneou 5 IPs internos | TEMPO: [TEMPO NORMAL] | FIREWALL: App [unknown]. Porta 445.",
-      "dica_rag": "Comportamento anômalo. Possível varredura SMB. Sugere-se investigação.",
-      "analise_contexto": "IP da REDE_INTERNA apresenta dispersão alta, tocando 5 alvos diferentes na porta 445 (SMB), mas sem tráfego de burst temporal ou alertas de DLP associados.",
-      "justificativa": "A movimentação lateral (dispersão em 5 alvos na porta 445) é altamente suspeita de reconhecimento interno. No entanto, a ausência de exfiltração de dados e a ausência de força bruta indicam que um bloqueio imediato pode ser precipitado. A decisão mais prudente é colocar o alvo em quarentena de observação.",
-      "veredito": "MONITORAR",
-      "nivel_confianca": "MEDIA"
-    }
-  ]
-}
-
 [INSTRUÇÃO PARA O LOTE ATUAL]
-Gere as avaliações para o lote fornecido usando a estrutura JSON estrita requerida.
+Gere as avaliações para o lote fornecido usando a estrutura JSON estrita requerida. NUNCA DEIXE OS CAMPOS DE ANÁLISE E JUSTIFICATIVA VAZIOS.
 """
 
         prompt_usuario_json = json.dumps(lista_incidentes, ensure_ascii=False, indent=2)
@@ -245,9 +228,22 @@ INCIDENTES EM REDE:
                 relatorio_processado.incidentes.append(inc_cache)
                 metricas_lote["cache_hits"] += 1
             else:
+                # ==========================================================
+                # 🔥 INTEGRAÇÃO MCP: ENRIQUECIMENTO DE CONTEXTO GLOBAL
+                # ==========================================================
+                padrao_enriquecido = inc.padrao_ataque
+                
+                # Só chamamos a API externa se não for tráfego local (10.x, 192.168.x)
+                if not inc.id_alvo.startswith(("10.", "192.168.", "172.")):
+                    # Consultamos a ficha do IP na nuvem
+                    ficha_criminal = self.mcp_intel.consultar_ip(inc.id_alvo)
+                    
+                    # Anexamos a ficha criminal no log para a IA ler!
+                    padrao_enriquecido += f" | {ficha_criminal}"
+
                 inc_dict = {
                     "id_alvo": inc.id_alvo,
-                    "padrao_ataque": inc.padrao_ataque,
+                    "padrao_ataque": padrao_enriquecido,  # <--- Aqui entra o dado enriquecido!
                     "dica_rag": inc.dica_rag,
                     # Preenche as lacunas para guiar modelos menores (Skeleton Prompting)
                     "analise_contexto": "",
@@ -262,7 +258,7 @@ INCIDENTES EM REDE:
         # ==========================================================
         # 2. INFERÊNCIA EM LOTE E CHAIN-OF-THOUGHT
         # ==========================================================
-        TAMANHO_LOTE = 3 
+                TAMANHO_LOTE = 3 
         
         for i in range(0, len(incidentes_para_ia), TAMANHO_LOTE):
             chunk = incidentes_para_ia[i:i + TAMANHO_LOTE]
