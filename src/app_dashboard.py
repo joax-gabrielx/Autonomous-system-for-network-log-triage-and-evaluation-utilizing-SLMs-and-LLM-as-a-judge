@@ -307,10 +307,10 @@ with tab5:
     with st.expander("📖 Os QUATRO (4) Quesitos de Julgamento", expanded=False):
         st.markdown("""
         **Como a IA Avaliadora (Nemotron 120B) penaliza ou corrobora as decisões da nossa SLM (Camada 3):**
-        1. 🔬 **Fidelidade Factual:** Verifica se a IA extraiu os IPs, volumes de MBs e portas corretamente do log bruto. Pune pesadamente alucinações (como inventar uma DMZ que não existe).
-        2. 🧠 **Qualidade de Raciocínio:** Analisa a profundidade da *Cadeia de Pensamento (CoT)*. A SLM cruzou tempo, espaço e volume antes de entregar o veredito? Ela justificou o contexto adequadamente?
-        3. 🎯 **Acurácia da Decisão:** O veredito reflete apropriadamente o risco? Pune a IA se ela seguiu o RAG cegamente num caso óbvio de exfiltração de dados, recompensando a inteligência analítica.
-        4. 🛡️ **Adesão à Instrução:** Avalia a obediência às restrições do prompt. Modelos indisciplinados deixam campos em branco ou quebram a formatação JSON exigida pelo sistema.
+        1. 🔬 **Fidelidade Factual:** Verifica se a IA extraiu os IPs, volumes de MBs e portas corretamente do log bruto. Pune pesadamente alucinações.
+        2. 🧠 **Qualidade de Raciocínio:** Analisa a profundidade da *Cadeia de Pensamento (CoT)*. A SLM cruzou tempo, espaço e volume antes de entregar o veredito?
+        3. 🎯 **Acurácia da Decisão:** O veredito reflete apropriadamente o risco?
+        4. 🛡️ **Adesão à Instrução:** Avalia a obediência às restrições do prompt e formatação JSON exigida pelo sistema.
         """)
         
     if dados_juiz:
@@ -319,20 +319,19 @@ with tab5:
         c_radar, c_box = st.columns(2)
         
         with c_radar:
-            # Pegando as médias de eficácia globais
+            # Pegando as médias de eficácia globais DO MODELO SELECIONADO
             media_fid = df_aud['fidelidade_factual'].mean() if 'fidelidade_factual' in df_aud else 0
             media_acu = df_aud['acuracia_decisao'].mean() if 'acuracia_decisao' in df_aud else 0
             media_rac = df_aud['qualidade_raciocinio'].mean() if 'qualidade_raciocinio' in df_aud else 0
             media_ade = df_aud['adesao_instrucao'].mean() if 'adesao_instrucao' in df_aud else 0
             
-            # NOMES ATUALIZADOS AQUI PARA O GRÁFICO DE RADAR
             df_radar = pd.DataFrame({
                 'Métrica de Estresse': ['Fidelidade Factual', 'Acurácia da Decisão', 'Qualidade de Raciocínio', 'Adesão à Instrução'],
                 'Desempenho (0-10)': [media_fid, media_acu, media_rac, media_ade]
             })
             
             fig_rad = px.line_polar(df_radar, r='Desempenho (0-10)', theta='Métrica de Estresse', line_close=True, 
-                                    title="Assinatura Qualitativa do Motor de Borda (Raio X)", range_r=[0, 10])
+                                    title=f"Assinatura Qualitativa: {modelo_selecionado}", range_r=[0, 10])
             fig_rad.update_traces(fill='toself', line_color='#9100c0', fillcolor='rgba(145, 0, 192, 0.4)')
             st.plotly_chart(fig_rad, use_container_width=True)
             
@@ -343,12 +342,67 @@ with tab5:
                 if not df_cruz.empty:
                     df_cruz['nivel_confianca'] = pd.Categorical(df_cruz['nivel_confianca'], categories=['BAIXA', 'MEDIA', 'ALTA'], ordered=True)
                     fig_box = px.box(df_cruz, x='nivel_confianca', y='acuracia_decisao', color='nivel_confianca',
-                                 title="Curva de Calibração: Certeza Projetada vs. Auditoria Real",
+                                 title="Curva de Calibração (Confiança vs. Acurácia)",
                                  points="all", color_discrete_map={'BAIXA': '#ff4b4b', 'MEDIA': '#ffa421', 'ALTA': '#00c04b'})
                     fig_box.update_yaxes(range=[0, 11])
                     st.plotly_chart(fig_box, use_container_width=True)
                 else:
-                    st.info("Pendente: Cruze de Dados de Avaliação para gerar a Projeção de Confiança.")
+                    st.info("Pendente: Cruze de Dados para Projeção de Confiança.")
+
+        # =========================================================
+        # 🔥 NOVO: LEADERBOARD COMPARATIVO ENTRE TODOS OS MODELOS
+        # =========================================================
+        st.divider()
+        st.subheader("🏆 Leaderboard: Comparativo Global de Modelos")
+        
+        dados_comparativos = []
+        for m in modelos_disponiveis:
+            caminho_auditoria_m = RESULTADOS_DIR_ROOT / m / "auditoria_global.json"
+            if caminho_auditoria_m.exists():
+                try:
+                    with open(caminho_auditoria_m, "r", encoding="utf-8") as f:
+                        dados_m = json.load(f)
+                    if dados_m:
+                        df_m = pd.DataFrame(dados_m)
+                        m_fid = df_m['fidelidade_factual'].mean() if 'fidelidade_factual' in df_m else 0
+                        m_acu = df_m['acuracia_decisao'].mean() if 'acuracia_decisao' in df_m else 0
+                        m_rac = df_m['qualidade_raciocinio'].mean() if 'qualidade_raciocinio' in df_m else 0
+                        m_ade = df_m['adesao_instrucao'].mean() if 'adesao_instrucao' in df_m else 0
+                        nota_total = m_fid + m_acu + m_rac + m_ade
+
+                        dados_comparativos.append({
+                            "Modelo": m,
+                            "Fidelidade Factual": m_fid,
+                            "Acurácia da Decisão": m_acu,
+                            "Qualidade de Raciocínio": m_rac,
+                            "Adesão à Instrução": m_ade,
+                            "Nota Total Máxima": nota_total
+                        })
+                except Exception as e:
+                    pass
+
+        if dados_comparativos:
+            df_comp = pd.DataFrame(dados_comparativos).sort_values(by="Nota Total Máxima", ascending=False)
+            
+            # Gráfico de Barras Empilhadas
+            fig_comp = px.bar(
+                df_comp,
+                x="Modelo",
+                y=["Fidelidade Factual", "Acurácia da Decisão", "Qualidade de Raciocínio", "Adesão à Instrução"],
+                title="Pontuação Total de Auditoria por Modelo (Máximo: 40 Pontos)",
+                labels={"value": "Pontuação Média", "variable": "Quesito Avaliado"},
+                barmode="stack",
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            # Adiciona a nota total em cima de cada barra
+            fig_comp.update_layout(yaxis_title="Nota Total de Desempenho", xaxis_title="Modelo Avaliado", hovermode="x unified")
+            st.plotly_chart(fig_comp, use_container_width=True)
+            
+            # Tabela de Detalhes
+            with st.expander("Tabela Detalhada do Leaderboard"):
+                st.dataframe(df_comp.style.format({col: "{:.1f}" for col in df_comp.columns if col != "Modelo"}), use_container_width=True, hide_index=True)
+        else:
+            st.info("Não há dados de múltiplos modelos disponíveis para gerar o Leaderboard.")
 
         # Recentes Pareceres de Auditoria do Juiz
         st.divider()
@@ -366,3 +420,20 @@ with tab5:
             
     else:
         st.info("A auditoria analítica paralela (Modelo Grande em Nuvem) ainda não gerou notas qualitativas.")
+
+        # Recentes Pareceres de Auditoria do Juiz
+        st.divider()
+        st.subheader("Auditorias Minuciosas Recentes")
+        for av in reversed(dados_juiz[-5:]):
+            alvo = av.get('id_alvo', av.get('ip', 'N/A'))
+            nota = av.get('acuracia_decisao', 0)
+            
+            if nota >= 8: st_col = "🟢"
+            elif nota >= 5: st_col = "🟡"
+            else: st_col = "🔴"
+            
+            st.markdown(f"**Alvo Inspecionado:** `{alvo}` | Classificação Final Lógica: **{st_col} {nota}/10**")
+            st.info(f"**Parecer Discursivo Oficial do Juiz Nuvem:** *{av.get('parecer_juiz', 'Sem comentários detalhados adicionais')}*")
+            
+        else:
+            st.info("A auditoria analítica paralela (Modelo Grande em Nuvem) ainda não gerou notas qualitativas.")

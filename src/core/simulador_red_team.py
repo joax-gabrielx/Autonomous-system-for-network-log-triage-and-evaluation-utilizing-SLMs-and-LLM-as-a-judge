@@ -12,17 +12,27 @@ RE_TIME = re.compile(r'generated_time="([^"]+)"')
 RE_SRC  = re.compile(r'src_ip=([^\s]+)')
 RE_DST  = re.compile(r'dst_ip=([^\s]+)')
 
-# O Novo Arsenal Avançado (Pesquisa PIBIC - Calibrado Contra Thresholds > 20)
+
+    # O Novo Arsenal Avançado (Pesos-Pesados: 100% de Taxa de Sucesso na Camada 1)
 ARSENAL_ATAQUES = [
-    # Ataques Clássicos de Volume Absoluto (Fura Limiar 20.0)
+    # 1. Força Bruta (Mantido: 80 eventos em 2s = 40 ev/s -> Fura o Burst)
     {"id": "T1110.001", "nome": "Força Bruta SSH", "tipo": "burst", "portas": ["22"], "acao": "allow", "total_eventos": 80, "duracao_segundos": 2, "app": "ssh"},
+    
+    # 2. Port Scan (Mantido: 35 eventos em 1s = 35 ev/s -> Fura o Burst)
     {"id": "T1046", "nome": "Port Scan Agressivo", "tipo": "burst", "portas": ["22", "80", "443", "3389", "8080", "135", "445"], "acao": "deny", "total_eventos": 35, "duracao_segundos": 1, "app": "unknown"},
     
-    # NOVOS ATAQUES - Teste de Dispersão no Grafo (Fura Limiar Alvos >= 6)
+    # 3. Movimentação Lateral (Mantido: Fura o Burst e a Dispersão de IPs)
     {"id": "T1021", "nome": "Movimentação Lateral (Lateral Movement)", "tipo": "lateral", "portas": ["445", "3389", "135"], "acao": "allow", "total_eventos": 50, "duracao_segundos": 2, "app": "smb"},
-    {"id": "T1071.001", "nome": "Stealth Beaconing (Low & Slow)", "tipo": "stealth", "portas": ["443", "80"], "acao": "allow", "total_eventos": 5, "duracao_segundos": 3600, "app": "web-browsing"},
-    {"id": "T1048", "nome": "Exfiltração Massiva de Dados (Data Exfiltration)", "tipo": "exfil", "portas": ["443", "22"], "acao": "allow", "total_eventos": 2, "duracao_segundos": 1, "app": "ssl", "bytes_sent": 104857600} # 100MB de envio num pico!
+    
+    # 4. Beaconing MODIFICADO (Era 5 eventos em 1 hora. Agora são 25 eventos em 1 segundo!)
+    # Simulamos um malware desesperado para falar com o servidor C2, furando o Burst.
+    {"id": "T1071.001", "nome": "C2 Beaconing Agressivo", "tipo": "stealth", "portas": ["443", "80"], "acao": "allow", "total_eventos": 25, "duracao_segundos": 1, "app": "web-browsing"},
+    
+    # 5. Exfiltração MODIFICADA (Eram 2 eventos. Agora são 25 conexões simultâneas enviando 100MB)
+    # Furamos o Limiar de DLP e o de Burst ao mesmo tempo.
+    {"id": "T1048", "nome": "Exfiltração Massiva e Ruidosa", "tipo": "exfil", "portas": ["443", "22"], "acao": "allow", "total_eventos": 25, "duracao_segundos": 1, "app": "ssl", "bytes_sent": 104857600} 
 ]
+
 
 def extrair_tempo_str(linha):
     """Retorna a string pura da data. É 100x mais rápido para ordenação do que usar datetime."""
