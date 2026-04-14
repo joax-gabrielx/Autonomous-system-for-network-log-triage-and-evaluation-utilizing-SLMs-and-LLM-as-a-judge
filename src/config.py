@@ -5,14 +5,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # =====================================================================
-# 🧠 1. MOTOR DO AGENTE IA (Ollama REST API)
+# 🧠 1. MOTOR DO AGENTE IA (Ollama REST API / Nuvem)
 # =====================================================================
 # Llama 3.2 (3B) otimizado para a sua RX 6600
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 
 # NOME DO MODELO DO EXPERIMENTO ATUAL (A/B Testing Isolado)
-# Por padrão é 'llama3.2', mas você pode colocar 'meu_modelo_finetuned' aqui ou no .env
-SLM_MODELO = os.getenv("SLM_MODELO", "AegisV3")
+SLM_MODELO = os.getenv("SLM_MODELO", "AegisV3") # Exemplo: "groq:llama-3.3-70b-versatile" ou "AegisV3" para o modelo local
 
 # =====================================================================
 # 📂 2. MAPEAMENTO DE DIRETÓRIOS E ARQUIVOS (Single Source of Truth)
@@ -23,9 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DADOS_RAW_DIR = BASE_DIR / "dados" / "raw"
 VECTOR_DB_DIR = BASE_DIR / "dados" / "vector_db"
 
-# Raiz Global de Resultados e Pasta Dinâmica do Modelo (Separação A/B)
+# Raiz Global de Resultados
 RESULTADOS_DIR_ROOT = BASE_DIR / "resultados"
-RESULTADOS_DIR = RESULTADOS_DIR_ROOT / SLM_MODELO
+
+# 🔥 AQUI ESTÁ A MÁGICA: Limpamos os dois pontos (:) para o Windows não reclamar
+NOME_PASTA_SEGURO = SLM_MODELO.replace(":", "-")
+
+# A pasta do modelo agora se chamará "groq-llama-3.3-70b-versatile"
+RESULTADOS_DIR = RESULTADOS_DIR_ROOT / NOME_PASTA_SEGURO
 
 # Arquivos de Estado e Persistência Específicos do Modelo (Não se misturam!)
 ARQUIVO_PLAYBOOK = RESULTADOS_DIR / "playbook_global.jsonl"
@@ -33,11 +37,12 @@ ARQUIVO_SFT = RESULTADOS_DIR / "fine_tuning_dataset.jsonl"
 ARQUIVO_MEMORIA = RESULTADOS_DIR / "memoria_global_ips.json"
 ARQUIVO_CONTROLE = RESULTADOS_DIR / "controle_leitura.json"
 ARQUIVO_METRICAS = RESULTADOS_DIR / "metricas_desempenho.jsonl"
-ARQUIVO_AUDITORIA = RESULTADOS_DIR / "auditoria_global.jsonl"
+ARQUIVO_AUDITORIA = RESULTADOS_DIR / "auditoria_global.json" # Corrigido de jsonl para json para a Aba 5 ler certo
 
 # Listas Globais de Borda (Manuais/Compartilhadas)
 ARQUIVO_BLACKLIST = RESULTADOS_DIR_ROOT / "blacklist_firewall.txt"
 ARQUIVO_WATCHLIST = RESULTADOS_DIR_ROOT / "watchlist_siem.txt"
+
 
 # =====================================================================
 # ⚙️ 3. REGRAS DO MOTOR DE INGESTÃO 24/7 (Camada 1 e IA)

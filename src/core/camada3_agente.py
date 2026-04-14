@@ -9,6 +9,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 from typing import List
+from groq import Groq # <--- IMPORTAÇÃO DA GROQ ADICIONADA AQUI
+
 from core.mcp_threat_intel import MCPThreatIntel
 from config import ARQUIVO_PLAYBOOK, ARQUIVO_SFT, ARQUIVO_METRICAS, SLM_MODELO, OLLAMA_URL, OLLAMA_KEEP_ALIVE, ARQUIVO_BLACKLIST
 
@@ -61,21 +63,22 @@ Sua tarefa é avaliar incidentes de rede e gerar a cadeia de pensamento completa
 2. O PESO DO FIREWALL: Se o log contiver 'FW-SEVERIDADE: HIGH' ou 'CRITICAL', isso é prova incontestável de ataque. Cite isso obrigatoriamente.
 3. INTELIGÊNCIA GLOBAL E ZERO-DAY: Se a tag '[🌍 THREAT INTEL]' mostrar um score alto, confirme o bloqueio. Se mostrar score BAIXO (ex: 0% ou 1%) MAS o firewall físico mostrar anomalias graves (Burst Alto, Severidade High, Movimentação Lateral), justifique explicitamente que se trata de um ataque direcionado ou infraestrutura nova (Zero-Day).
 4. CONCORDÂNCIA E OVERRIDE: Só discorde do RAG se ele disser "Falso Positivo" mas os dados físicos apontarem anomalias graves.
+5. CETICISMO PROTOCOLAR (CRÍTICO): Nunca aceite cegamente a sugestão do RAG se houver incompatibilidade técnica. Exemplo: Se o RAG sugerir 'Força Bruta SSH', mas o log mostrar porta 443, 80 ou app 'web-browsing/ssl', VOCÊ DEVE corrigir o RAG, afirmando que a porta indica 'Beaconing C2' ou 'Exfiltração Web', e não SSH. Mantenha o bloqueio, mas corrija a tipificação técnica.
 
 [ESTRUTURA OBRIGATÓRIA DA ANALISE DE CONTEXTO]
 Para evitar análises rasas, o seu campo "analise_contexto" DEVE conter exatamente estes 3 passos lógicos. Você será sumariamente punido se omitir tags presentes no log.
 - Fatos Internos: Liste EXPLICITAMENTE e copie os termos literais encontrados para: Comportamento Temporal (ex: [BURST AGUDO]), Dispersão Espacial (ex: [FOCADO]), FW-SEVERIDADE, FW-THREAT e a volumetria exata de eventos. Em seguida, descreva o ataque.
 - Fatos Externos: Qual é o Score exato da Threat Intel Global e o que isso indica?
-- Correlação: Como essas peças comprovam (ou refutam) a recomendação do RAG?
+- Correlação: Existe coerência técnica entre a porta atacada (ex: 443/80) e a tipificação da ameaça do RAG? Como a junção da Severidade, Threat Intel e os dados de Espaço/Tempo comprovam ou refutam o RAG? Justifique o veredito final.
 
-EXEMPLO 1: Concordância e Zero-Day]
+[EXEMPLO 1: Concordância e Zero-Day]
 {
   "avaliacoes": [
     {
       "id_alvo": "185.15.20.50",
       "padrao_ataque": "ST-ALIGN | ESPAÇO: [FOCADO] | TEMPO: [BURST AGUDO] Taxa de 50.0 ev/s | FW-SEVERIDADE: HIGH | FW-THREAT: RedTeam-Attack | [🌍 THREAT INTEL: LIMPO] O IP tem Score 0%.",
       "dica_rag": "Ameaça Crítica. Recomenda-se BLOQUEAR.",
-      "analise_contexto": "Fatos Internos: O tráfego apresenta TEMPO [BURST AGUDO] com 50.0 ev/s e ESPAÇO [FOCADO]. O firewall emitiu alertas críticos explícitos: FW-SEVERIDADE: HIGH e FW-THREAT: RedTeam-Attack.\nFatos Externos: A Threat Intel aponta IP [🌍 THREAT INTEL: LIMPO] com Score 0%.\nCorrelação: Apesar do histórico limpo externo (Score 0%), os alertas severos do equipamento físico comprovam um ataque ativo. A divergência aponta inegavelmente para um ataque do tipo Zero-Day.",
+      "analise_contexto": "Fatos Internos: O tráfego apresenta TEMPO [BURST AGUDO] com 50.0 ev/s e ESPAÇO [FOCADO]. O firewall emitiu alertas críticos explícitos: FW-SEVERIDADE: HIGH e FW-THREAT: RedTeam-Attack.\\nFatos Externos: A Threat Intel aponta IP [🌍 THREAT INTEL: LIMPO] com Score 0%.\\nCorrelação: Apesar do histórico limpo externo (Score 0%), os alertas severos do equipamento físico comprovam um ataque ativo. A divergência aponta inegavelmente para um ataque do tipo Zero-Day.",
       "justificativa": "Evidências físicas de anomalia volumétrica e alertas HIGH do firewall sobrepõem o histórico limpo externo da API. Ação preventiva mandatória para conter o Zero-Day.",
       "veredito": "BLOQUEAR",
       "nivel_confianca": "ALTA"
@@ -97,7 +100,6 @@ INCIDENTES EM REDE:
 """
 
         # 🔥 A OPÇÃO NUCLEAR: Structured Outputs (Esquema JSON Forçado)
-        # O Ollama será fisicamente impedido de ignorar qualquer uma destas chaves.
         esquema_forcado = {
             "type": "object",
             "properties": {
@@ -124,50 +126,84 @@ INCIDENTES EM REDE:
             "required": ["avaliacoes"]
         }
 
-        # Payload formatado perfeitamente para a API nativa do Ollama Local
-        payload = {
-            "model": self.MODELO,
-            "system": prompt_sistema,
-            "prompt": prompt_usuario,
-            "format": esquema_forcado,
-            "stream": False,
-            "keep_alive": self.OLLAMA_KEEP_ALIVE,
-            "options": {
-                "temperature": 0.0
-            }
-        }
-
-        tentativas = 0
-        max_tentativas = 3
-        while tentativas < max_tentativas:
+        # =========================================================
+        # 🔀 ROTEADOR DE INFERÊNCIA: CLOUD (API) vs EDGE (LOCAL)
+        # =========================================================
+        t0 = time.time()
+        
+        if "groq" in self.MODELO.lower():
+            # ☁️ Rota 1: IA na Nuvem via API (Groq)
+            nome_modelo_real = self.MODELO.lower().replace("groq:", "").replace("groq-", "")
+            cliente_groq = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            
             try:
-                t0_local = time.time()
+                resposta = cliente_groq.chat.completions.create(
+                    model=nome_modelo_real,
+                    messages=[
+                        {"role": "system", "content": prompt_sistema},
+                        {"role": "user", "content": prompt_usuario}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.0
+                )
+                texto_resposta = resposta.choices[0].message.content
+                t_total = time.time() - t0
                 
-                # Dispara o log para a placa de vídeo local via Ollama
-                resposta = requests.post(self.OLLAMA_URL, json=payload, timeout=180)
-                resposta.raise_for_status() 
-                
-                dados = resposta.json()
-                texto_resposta = dados.get("response", "")
-                
-                t_total = time.time() - t0_local
-                
-                # Conversão do tempo de nanosegundos (Ollama) para segundos
+                # Mockamos as métricas do Ollama para a Groq
                 metricas_ia = {
-                    "total_duration": dados.get("total_duration", 0) / 1e9,
-                    "prompt_eval_count": dados.get("prompt_eval_count", 0),
-                    "eval_count": dados.get("eval_count", 0),
-                    "eval_duration": dados.get("eval_duration", 0) / 1e9
+                    "total_duration": t_total,
+                    "prompt_eval_count": 0,
+                    "eval_count": len(texto_resposta.split()), 
+                    "eval_duration": t_total
                 }
-                
                 return texto_resposta, prompt_sistema, prompt_usuario_json, metricas_ia
                 
             except Exception as e:
-                tentativas += 1
-                logger.error(f"Falha na API Local do Ollama: {e}. Tentativa {tentativas}...")
-                time.sleep(2)
-                
-        return '{"avaliacoes": []}', prompt_sistema, prompt_usuario_json, {}
+                logger.error(f"Falha na API Groq: {e}")
+                return '{"avaliacoes": []}', prompt_sistema, prompt_usuario_json, {}
+
+        else:
+            # 💻 Rota 2: IA na Borda via Ollama (Local)
+            payload = {
+                "model": self.MODELO,
+                "system": prompt_sistema,
+                "prompt": prompt_usuario,
+                "format": esquema_forcado,
+                "stream": False,
+                "keep_alive": self.OLLAMA_KEEP_ALIVE,
+                "options": {
+                    "temperature": 0.0
+                }
+            }
+
+            tentativas = 0
+            max_tentativas = 3
+            while tentativas < max_tentativas:
+                try:
+                    t0_local = time.time()
+                    
+                    resposta = requests.post(self.OLLAMA_URL, json=payload, timeout=180)
+                    resposta.raise_for_status() 
+                    
+                    dados = resposta.json()
+                    texto_resposta = dados.get("response", "")
+                    
+                    # Conversão do tempo de nanosegundos (Ollama) para segundos
+                    metricas_ia = {
+                        "total_duration": dados.get("total_duration", 0) / 1e9,
+                        "prompt_eval_count": dados.get("prompt_eval_count", 0),
+                        "eval_count": dados.get("eval_count", 0),
+                        "eval_duration": dados.get("eval_duration", 0) / 1e9
+                    }
+                    
+                    return texto_resposta, prompt_sistema, prompt_usuario_json, metricas_ia
+                    
+                except Exception as e:
+                    tentativas += 1
+                    logger.error(f"Falha na API Local do Ollama: {e}. Tentativa {tentativas}...")
+                    time.sleep(2)
+                    
+            return '{"avaliacoes": []}', prompt_sistema, prompt_usuario_json, {}
 
     def executar_mcp_salvar_lote(self, relatorio_triagem_input, num_lote=1, metricas_lote=None, borda_blacklist=None):
         relatorio_processado = RelatorioTriagem()
@@ -220,9 +256,8 @@ INCIDENTES EM REDE:
 
                 inc_dict = {
                     "id_alvo": inc.id_alvo,
-                    "padrao_ataque": padrao_enriquecido,  # <--- Aqui entra o dado enriquecido!
+                    "padrao_ataque": padrao_enriquecido,  
                     "dica_rag": inc.dica_rag,
-                    # Preenche as lacunas para guiar modelos menores (Skeleton Prompting)
                     "analise_contexto": "",
                     "justificativa": "",
                     "veredito": "",
@@ -235,7 +270,7 @@ INCIDENTES EM REDE:
         # ==========================================================
         # 2. INFERÊNCIA EM LOTE E CHAIN-OF-THOUGHT
         # ==========================================================
-                TAMANHO_LOTE = 3 
+        TAMANHO_LOTE = 3 
         
         for i in range(0, len(incidentes_para_ia), TAMANHO_LOTE):
             chunk = incidentes_para_ia[i:i + TAMANHO_LOTE]
@@ -274,7 +309,7 @@ INCIDENTES EM REDE:
                         {"role": "user", "content": prompt_usuario},
                         {"role": "assistant", "content": resposta_ia_str}
                     ]}
-                    dados_sft.append(json.dumps(linha_sft, ensure_ascii=False) + "\n")
+                    dados_sft.append(json.dumps(linha_sft, ensure_ascii=False) + "\\n")
                     
             except (json.JSONDecodeError, ValidationError) as e:
                 logger.error(f"Falha ao processar o Batch: {e}")
@@ -294,12 +329,12 @@ INCIDENTES EM REDE:
                 if borda_blacklist is not None and i.id_alvo not in borda_blacklist:
                     borda_blacklist[i.id_alvo] = time.time()
                     with open(self.ARQUIVO_BLACKLIST, "a", encoding="utf-8") as bf:
-                        bf.write(f"{i.id_alvo}\n")
+                        bf.write(f"{i.id_alvo}\\n")
                 
         if novas_decisoes:
             with open(self.ARQUIVO_PLAYBOOK, "a", encoding="utf-8") as f:
                 for d in novas_decisoes:
-                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(d, ensure_ascii=False) + "\\n")
             
         if dados_sft: 
             with open(self.ARQUIVO_SFT, "a", encoding="utf-8") as f:
@@ -320,4 +355,4 @@ INCIDENTES EM REDE:
             metricas_lote["tps"] = 0.0
             
         with open(self.ARQUIVO_METRICAS, "a", encoding="utf-8") as f:
-            f.write(json.dumps(metricas_lote, ensure_ascii=False) + "\n")
+            f.write(json.dumps(metricas_lote, ensure_ascii=False) + "\\n")
