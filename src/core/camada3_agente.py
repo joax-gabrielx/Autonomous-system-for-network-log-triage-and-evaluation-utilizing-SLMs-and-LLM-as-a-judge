@@ -309,7 +309,7 @@ INCIDENTES EM REDE:
                         {"role": "user", "content": prompt_usuario},
                         {"role": "assistant", "content": resposta_ia_str}
                     ]}
-                    dados_sft.append(json.dumps(linha_sft, ensure_ascii=False) + "\\n")
+                    dados_sft.append(json.dumps(linha_sft, ensure_ascii=False) + "\n")
                     
             except (json.JSONDecodeError, ValidationError) as e:
                 logger.error(f"Falha ao processar o Batch: {e}")
@@ -329,12 +329,12 @@ INCIDENTES EM REDE:
                 if borda_blacklist is not None and i.id_alvo not in borda_blacklist:
                     borda_blacklist[i.id_alvo] = time.time()
                     with open(self.ARQUIVO_BLACKLIST, "a", encoding="utf-8") as bf:
-                        bf.write(f"{i.id_alvo}\\n")
+                        bf.write(f"{i.id_alvo}\n")
                 
         if novas_decisoes:
             with open(self.ARQUIVO_PLAYBOOK, "a", encoding="utf-8") as f:
                 for d in novas_decisoes:
-                    f.write(json.dumps(d, ensure_ascii=False) + "\\n")
+                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
             
         if dados_sft: 
             with open(self.ARQUIVO_SFT, "a", encoding="utf-8") as f:
@@ -355,4 +355,4 @@ INCIDENTES EM REDE:
             metricas_lote["tps"] = 0.0
             
         with open(self.ARQUIVO_METRICAS, "a", encoding="utf-8") as f:
-            f.write(json.dumps(metricas_lote, ensure_ascii=False) + "\\n")
+            f.write(json.dumps(metricas_lote, ensure_ascii=False) + "\n")

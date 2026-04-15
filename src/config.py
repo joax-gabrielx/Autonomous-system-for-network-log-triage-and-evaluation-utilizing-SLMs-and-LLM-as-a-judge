@@ -11,7 +11,7 @@ load_dotenv()
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 
 # NOME DO MODELO DO EXPERIMENTO ATUAL (A/B Testing Isolado)
-SLM_MODELO = os.getenv("SLM_MODELO", "AegisV3") # Exemplo: "groq:llama-3.3-70b-versatile" ou "AegisV3" para o modelo local
+SLM_MODELO = os.getenv("SLM_MODELO", "llama-3.3-70b-versatile") # Exemplo: "groq:llama-3.3-70b-versatile" ou "AegisV3" para o modelo local
 
 # =====================================================================
 # 📂 2. MAPEAMENTO DE DIRETÓRIOS E ARQUIVOS (Single Source of Truth)

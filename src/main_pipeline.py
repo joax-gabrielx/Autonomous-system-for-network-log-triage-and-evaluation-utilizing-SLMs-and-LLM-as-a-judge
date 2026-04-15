@@ -120,7 +120,7 @@ def executar_pipeline():
             # 2. Injeção de Caos (Red Team)
             if RED_TEAM_ATIVO:
                 # 5% de chance de injetar um ataque brutal neste lote para treinar o modelo
-                linhas_mistas = injetar_ataque_no_lote(linhas_brutas, probabilidade_injecao=0.05)
+                linhas_mistas = injetar_ataque_no_lote(linhas_brutas, probabilidade_injecao=1.0)
             else:
                 linhas_mistas = linhas_brutas
 
